@@ -258,8 +258,7 @@ function render() {
       <div class="field">
         <span class="lbl">${lbl}</span>
         <span class="val ${val ? '' : 'empty'}" title="${esc(val)}">${val ? esc(val) : 'vazio'}</span>
-        ${val ? `<button class="btn small" data-act="copy" data-kind="${kind}" data-uid="${m.uid}">Copiar</button>` : ''}
-        ${val && kind === 'id' ? `<button class="btn small" data-act="copy" data-kind="mention" data-uid="${m.uid}" title="Copiar como &lt;@id&gt;">&lt;@&gt;</button>` : ''}
+        ${val ? `<button class="btn small" data-act="copy" data-kind="${kind}" data-uid="${m.uid}"${kind === 'id' ? ' title="Copia como &lt;@id&gt;"' : ''}>Copiar</button>` : ''}
       </div>`;
     return `
       <li class="item ${done ? 'done' : ''}">
@@ -305,7 +304,7 @@ function openModal(title, bodyHtml, actions) {
 
 // Copiar → confirmar entrega
 async function onCopy(m, kind) {
-  const text = kind === 'email' ? m.email : kind === 'mention' ? `<@${m.discord}>` : m.discord;
+  const text = kind === 'email' ? m.email : `<@${m.discord}>`;
   await copyText(text);
   toast(`Copiado: ${text}`);
 }
