@@ -71,7 +71,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); border-color: tran
 .check input { width: auto; }
 
 /* App */
-main { max-width: 1000px; margin: 0 auto; padding: 20px 16px 60px; }
+main { max-width: 1180px; margin: 0 auto; padding: 20px 16px 60px; }
 .top { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-bottom: 18px; }
 .top h1 { font-size: 22px; }
 .month { display: flex; align-items: center; gap: 8px; font-weight: 600; }
@@ -97,9 +97,14 @@ main { max-width: 1000px; margin: 0 auto; padding: 20px 16px 60px; }
 .item {
   background: var(--panel); border: 1px solid transparent; border-radius: var(--radius);
   padding: 12px 14px;
-  display: grid; grid-template-columns: 150px 1fr 1fr auto; gap: 10px 16px; align-items: center;
+  display: grid; grid-template-columns: 150px minmax(90px, .7fr) 1fr 1fr auto; gap: 10px 16px; align-items: center;
 }
 .item.done { border-color: rgba(35, 165, 90, .4); }
+.name {
+  font-weight: 600; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.name.empty { color: var(--muted); font-weight: 400; font-style: italic; font-size: 13px; }
 .field { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .field .val {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

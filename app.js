@@ -245,7 +245,7 @@ function render() {
   const plat = $('#platFilter').value;
   const items = state.members.filter((m) => {
     if (m.cat !== currentCat) return false;
-    if (q && !`${m.discord} ${m.email} ${m.note || ''}`.toLowerCase().includes(q)) return false;
+    if (q && !`${m.name || ''} ${m.discord} ${m.email} ${m.note || ''}`.toLowerCase().includes(q)) return false;
     if (filter === 'pending' && isDone(m)) return false;
     if (filter === 'done' && !isDone(m)) return false;
     if (plat !== 'all' && (m.platform || 'none') !== plat) return false;
@@ -264,6 +264,7 @@ function render() {
     return `
       <li class="item ${done ? 'done' : ''}">
         ${platTag(m.platform)}
+        <div class="name ${m.name ? '' : 'empty'}" title="${esc(m.name)}">${m.name ? esc(m.name) : 'sem nome'}</div>
         ${field('ID', m.discord, 'id')}
         ${field('E-mail', m.email, 'email')}
         <div class="side">
@@ -353,6 +354,7 @@ function openEdit(m) {
       if (!discord && !email) { toast('Preencha o ID ou o e-mail'); return false; }
       const target = m || { uid: uid(), delivered: {} };
       target.cat = $('#fCat').value;
+      target.name = $('#fName').value.trim();
       target.discord = discord;
       target.email = email;
       target.note = $('#fNote').value.trim();
@@ -365,6 +367,7 @@ function openEdit(m) {
   openModal(isNew ? 'Adicionar membro' : 'Editar membro', `
     <label>Categoria <select id="fCat">${opts}</select></label>
     <label>Plataforma <select id="fPlat"><option value="">Sem plataforma</option>${platOpts}</select></label>
+    <label>Nome <input id="fName" value="${esc(m ? m.name : '')}" placeholder="Nome ou apelido"></label>
     <label>ID do Discord <input id="fDiscord" value="${esc(m ? m.discord : '')}" placeholder="123456789012345678 ou <@123…>"></label>
     <label>E-mail / usuário <input id="fEmail" value="${esc(m ? m.email : '')}" placeholder="email@exemplo.com"></label>
     <label>Observação (opcional) <input id="fNote" value="${esc(m ? m.note : '')}"></label>`, actions);
