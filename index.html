@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Controle VIP</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Tela de senha -->
+  <section id="lock" class="lock">
+    <form id="lockForm" class="lock-card">
+      <h1>Controle VIP</h1>
+      <p class="muted">Os dados ficam criptografados. Digite a senha para abrir.</p>
+      <input id="lockPw" type="password" placeholder="Senha" autocomplete="current-password" required>
+      <label class="check"><input id="lockRemember" type="checkbox"> Lembrar neste aparelho</label>
+      <button class="btn primary" type="submit">Abrir</button>
+      <p id="lockErr" class="err" hidden></p>
+    </form>
+  </section>
+
+  <!-- App -->
+  <main id="app" hidden>
+    <header class="top">
+      <h1>Controle VIP</h1>
+      <div class="month">
+        <button class="btn icon" id="prevMonth" title="Mês anterior">‹</button>
+        <span id="monthLabel"></span>
+        <button class="btn icon" id="nextMonth" title="Próximo mês">›</button>
+      </div>
+      <div class="top-actions">
+        <span id="syncState" class="sync"></span>
+        <button class="btn primary" id="saveGh">Salvar no GitHub</button>
+        <button class="btn" id="settingsBtn" title="Configurações">⚙</button>
+      </div>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab active" data-cat="betas">Betas <span class="count" id="count-betas"></span></button>
+      <button class="tab" data-cat="similar">Similar <span class="count" id="count-similar"></span></button>
+    </nav>
+
+    <div class="toolbar">
+      <input id="search" type="search" placeholder="Buscar por ID ou e-mail…">
+      <select id="filter">
+        <option value="all">Todos</option>
+        <option value="pending">Pendentes</option>
+        <option value="done">Entregues</option>
+      </select>
+      <button class="btn" id="addBtn">+ Adicionar membro</button>
+    </div>
+
+    <ul id="list" class="list"></ul>
+    <p id="empty" class="muted center" hidden>Nenhum membro aqui.</p>
+  </main>
+
+  <!-- Modal genérico -->
+  <dialog id="modal">
+    <form method="dialog" id="modalForm">
+      <h2 id="modalTitle"></h2>
+      <div id="modalBody"></div>
+      <div class="modal-actions" id="modalActions"></div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
