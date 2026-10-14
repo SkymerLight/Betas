@@ -268,8 +268,10 @@ function render() {
         ${field('ID', m.discord, 'id')}
         ${field('E-mail', m.email, 'email')}
         <div class="side">
-          <button class="pill ${done ? 'done' : 'pending'}" data-act="toggle" data-uid="${m.uid}"
-            title="Clique para alternar">${done ? `✓ Entregue ${fmtDate(m.delivered[viewMonth])}` : 'Pendente'}</button>
+          <span class="pill ${done ? 'done' : 'pending'}">${done ? `✓ Entregue ${fmtDate(m.delivered[viewMonth])}` : 'Pendente'}</span>
+          ${done
+            ? `<button class="btn small" data-act="toggle" data-uid="${m.uid}" title="Voltar para pendente">Desfazer</button>`
+            : `<button class="btn small ok" data-act="toggle" data-uid="${m.uid}">✓ Marcar entregue</button>`}
           <button class="btn small" data-act="edit" data-uid="${m.uid}">Editar</button>
         </div>
         ${m.note ? `<div class="note">${esc(m.note)}</div>` : ''}
@@ -305,13 +307,7 @@ function openModal(title, bodyHtml, actions) {
 async function onCopy(m, kind) {
   const text = kind === 'email' ? m.email : kind === 'mention' ? `<@${m.discord}>` : m.discord;
   await copyText(text);
-  if (isDone(m)) { toast(`Copiado: ${text} (já entregue)`); return; }
-  openModal('Copiado ✓', `
-    <p><code>${esc(text)}</code></p>
-    <p>Marcar o VIP de <b>${esc(monthLabel(viewMonth))}</b> como entregue para este membro?</p>`, [
-    { label: 'Só copiei' },
-    { label: 'OK, entregue', cls: 'ok', onClick: () => setDelivered(m, true) },
-  ]);
+  toast(`Copiado: ${text}`);
 }
 
 async function setDelivered(m, on) {
