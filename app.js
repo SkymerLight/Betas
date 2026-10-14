@@ -48,6 +48,11 @@ function shiftMonth(key, delta) {
 function fmtDate(iso) {
   return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
+function toLocalInput(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
@@ -138,7 +143,7 @@ async function saveToGitHub() {
   if (!lsGet(LS.token)) { openTokenModal(true); return; }
   const btn = $('#saveGh');
   btn.disabled = true;
-  btn.textContent = 'Salvando…';
+  btn.querySelector('span').textContent = 'Salvando…';
   try {
     const current = await ghGetFile();
     const blob = await encryptData(state, password);
@@ -159,7 +164,7 @@ async function saveToGitHub() {
     toast('Erro ao salvar: ' + e.message);
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Salvar no GitHub';
+    btn.querySelector('span').textContent = 'Salvar no GitHub';
     renderSync();
   }
 }
@@ -218,12 +223,18 @@ function platTag(key) {
   return `<span class="ptag ${key}">${p.icon ? `<span class="pico">${p.icon}</span>` : ''}${p.label}</span>`;
 }
 
+function initials(name) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
+}
+
 function isDone(m) { return Boolean(m.delivered && m.delivered[viewMonth]); }
 
 function renderSync() {
   const el = $('#syncState');
   if (lsGet(LS.dirty)) {
-    el.textContent = '● Alterações não salvas no GitHub';
+    el.textContent = '● Não salvo no GitHub';
     el.className = 'sync dirty';
   } else {
     el.textContent = '✓ Sincronizado';
@@ -240,6 +251,14 @@ function render() {
     $(`#count-${cat}`).textContent = `${ms.filter(isDone).length}/${ms.length}`;
   }
 
+  const inTab = state.members.filter((m) => m.cat === currentCat);
+  const doneCount = inTab.filter(isDone).length;
+  const pct = inTab.length ? Math.round((doneCount / inTab.length) * 100) : 0;
+  $('#statDone').textContent = doneCount;
+  $('#statPending').textContent = inTab.length - doneCount;
+  $('#statPct').textContent = `${pct}%`;
+  $('#statBar').style.width = `${pct}%`;
+
   const q = $('#search').value.trim().toLowerCase();
   const filter = $('#filter').value;
   const plat = $('#platFilter').value;
@@ -252,24 +271,36 @@ function render() {
     return true;
   });
 
-  $('#list').innerHTML = items.map((m) => {
+  const copyIc = '<svg class="ic" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
+  $('#list').innerHTML = items.map((m, i) => {
     const done = isDone(m);
+    const pkey = PLATFORMS[m.platform] ? m.platform : 'none';
     const field = (lbl, val, kind) => `
       <div class="field">
-        <span class="lbl">${lbl}</span>
-        <span class="val ${val ? '' : 'empty'}" title="${esc(val)}">${val ? esc(val) : 'vazio'}</span>
-        ${val ? `<button class="btn small" data-act="copy" data-kind="${kind}" data-uid="${m.uid}"${kind === 'id' ? ' title="Copia como &lt;@id&gt;"' : ''}>Copiar</button>` : ''}
+        <div class="field-text">
+          <span class="lbl">${lbl}</span>
+          <span class="val ${val ? '' : 'empty'}" title="${esc(val)}">${val ? esc(val) : 'vazio'}</span>
+        </div>
+        ${val ? `<button class="btn small copy" data-act="copy" data-kind="${kind}" data-uid="${m.uid}"${kind === 'id' ? ' title="Copia como &lt;@id&gt;"' : ''}>${copyIc}Copiar</button>` : ''}
       </div>`;
     return `
-      <li class="item ${done ? 'done' : ''}">
-        ${platTag(m.platform)}
-        <div class="name ${m.name ? '' : 'empty'}" title="${esc(m.name)}">${m.name ? esc(m.name) : 'sem nome'}</div>
-        ${field('ID', m.discord, 'id')}
+      <li class="item p-${pkey} ${done ? 'done' : ''}" style="animation-delay:${Math.min(i, 15) * 25}ms">
+        <div class="who">
+          <div class="avatar">${esc(initials(m.name))}</div>
+          <div class="who-text">
+            <div class="name ${m.name ? '' : 'empty'}" title="${esc(m.name)}">${m.name ? esc(m.name) : 'sem nome'}</div>
+            ${platTag(m.platform)}
+          </div>
+        </div>
+        ${field('Discord', m.discord, 'id')}
         ${field('E-mail', m.email, 'email')}
         <div class="side">
-          <span class="pill ${done ? 'done' : 'pending'}">${done ? `✓ Entregue ${fmtDate(m.delivered[viewMonth])}` : 'Pendente'}</span>
+          <div class="status">
+            <span class="pill ${done ? 'done' : 'pending'}">${done ? 'Entregue' : 'Pendente'}</span>
+            ${done ? `<span class="when">${fmtDate(m.delivered[viewMonth])}</span>` : ''}
+          </div>
           ${done
-            ? `<button class="btn small" data-act="toggle" data-uid="${m.uid}" title="Voltar para pendente">Desfazer</button>`
+            ? `<button class="btn small ghost" data-act="toggle" data-uid="${m.uid}" title="Voltar para pendente">Desfazer</button>`
             : `<button class="btn small ok" data-act="toggle" data-uid="${m.uid}">✓ Marcar entregue</button>`}
           <button class="btn small" data-act="edit" data-uid="${m.uid}">Editar</button>
         </div>
@@ -303,10 +334,16 @@ function openModal(title, bodyHtml, actions) {
 }
 
 // Copiar → confirmar entrega
-async function onCopy(m, kind) {
+async function onCopy(m, kind, btn) {
   const text = kind === 'email' ? m.email : `<@${m.discord}>`;
   await copyText(text);
   toast(`Copiado: ${text}`);
+  if (btn) {
+    const html = btn.innerHTML;
+    btn.classList.add('copied');
+    btn.textContent = '✓ Copiado';
+    setTimeout(() => { btn.classList.remove('copied'); btn.innerHTML = html; }, 1400);
+  }
 }
 
 async function setDelivered(m, on) {
@@ -354,18 +391,35 @@ function openEdit(m) {
       target.email = email;
       target.note = $('#fNote').value.trim();
       target.platform = $('#fPlat').value;
+      target.delivered = target.delivered || {};
+      const del = $('#fDel').value;
+      if (del) target.delivered[viewMonth] = new Date(del).toISOString();
+      else delete target.delivered[viewMonth];
       if (isNew) state.members.push(target);
       await commit();
       toast(isNew ? 'Membro adicionado' : 'Alterações salvas');
     },
   });
   openModal(isNew ? 'Adicionar membro' : 'Editar membro', `
-    <label>Categoria <select id="fCat">${opts}</select></label>
-    <label>Plataforma <select id="fPlat"><option value="">Sem plataforma</option>${platOpts}</select></label>
+    <div class="row2">
+      <label>Categoria <select id="fCat">${opts}</select></label>
+      <label>Plataforma <select id="fPlat"><option value="">Sem plataforma</option>${platOpts}</select></label>
+    </div>
     <label>Nome <input id="fName" value="${esc(m ? m.name : '')}" placeholder="Nome ou apelido"></label>
     <label>ID do Discord <input id="fDiscord" value="${esc(m ? m.discord : '')}" placeholder="123456789012345678 ou <@123…>"></label>
     <label>E-mail / usuário <input id="fEmail" value="${esc(m ? m.email : '')}" placeholder="email@exemplo.com"></label>
-    <label>Observação (opcional) <input id="fNote" value="${esc(m ? m.note : '')}"></label>`, actions);
+    <label>Observação (opcional) <input id="fNote" value="${esc(m ? m.note : '')}"></label>
+    <div class="del-box">
+      <label>Entrega de ${esc(monthLabel(viewMonth))}
+        <input id="fDel" type="datetime-local" value="${toLocalInput(m && m.delivered && m.delivered[viewMonth])}">
+      </label>
+      <div class="del-actions">
+        <button type="button" class="btn small" id="fDelNow">Agora</button>
+        <button type="button" class="btn small" id="fDelClear">Limpar (pendente)</button>
+      </div>
+    </div>`, actions);
+  $('#fDelNow').addEventListener('click', () => { $('#fDel').value = toLocalInput(new Date().toISOString()); });
+  $('#fDelClear').addEventListener('click', () => { $('#fDel').value = ''; });
 }
 
 function openTokenModal(thenSave) {
@@ -437,7 +491,7 @@ $('#list').addEventListener('click', (e) => {
   if (!b) return;
   const m = state.members.find((x) => x.uid === b.dataset.uid);
   if (!m) return;
-  if (b.dataset.act === 'copy') onCopy(m, b.dataset.kind);
+  if (b.dataset.act === 'copy') onCopy(m, b.dataset.kind, b);
   if (b.dataset.act === 'toggle') onToggle(m);
   if (b.dataset.act === 'edit') openEdit(m);
 });
