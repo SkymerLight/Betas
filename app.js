@@ -6,6 +6,12 @@ const BRANCH = 'main';
 const DATA_FILE = 'data.enc.json';
 const ITERATIONS = 250000;
 const CATS = { betas: 'Betas', similar: 'Similar' };
+const PLATFORMS = {
+  android: { label: 'Android', icon: '🤖' },
+  tablet: { label: 'Android · Tablet', icon: '📱' },
+  ios: { label: 'iOS', icon: '' },
+  desktop: { label: 'Desktop', icon: '🖥️' },
+};
 
 const LS = {
   local: 'vip.localBlob',   // cópia local criptografada (sempre a mais recente)
@@ -206,6 +212,12 @@ $('#lockForm').addEventListener('submit', async (e) => {
 });
 
 // ===== Renderização =====
+function platTag(key) {
+  const p = PLATFORMS[key];
+  if (!p) return '<span class="ptag none">Sem plataforma</span>';
+  return `<span class="ptag ${key}">${p.icon ? `<span class="pico">${p.icon}</span>` : ''}${p.label}</span>`;
+}
+
 function isDone(m) { return Boolean(m.delivered && m.delivered[viewMonth]); }
 
 function renderSync() {
@@ -230,11 +242,13 @@ function render() {
 
   const q = $('#search').value.trim().toLowerCase();
   const filter = $('#filter').value;
+  const plat = $('#platFilter').value;
   const items = state.members.filter((m) => {
     if (m.cat !== currentCat) return false;
     if (q && !`${m.discord} ${m.email} ${m.note || ''}`.toLowerCase().includes(q)) return false;
     if (filter === 'pending' && isDone(m)) return false;
     if (filter === 'done' && !isDone(m)) return false;
+    if (plat !== 'all' && (m.platform || 'none') !== plat) return false;
     return true;
   });
 
@@ -249,6 +263,7 @@ function render() {
       </div>`;
     return `
       <li class="item ${done ? 'done' : ''}">
+        ${platTag(m.platform)}
         ${field('ID', m.discord, 'id')}
         ${field('E-mail', m.email, 'email')}
         <div class="side">
@@ -317,6 +332,8 @@ function openEdit(m) {
   const isNew = !m;
   const opts = Object.entries(CATS).map(([k, v]) =>
     `<option value="${k}" ${(m ? m.cat : currentCat) === k ? 'selected' : ''}>${v}</option>`).join('');
+  const platOpts = Object.entries(PLATFORMS).map(([k, v]) =>
+    `<option value="${k}" ${m && m.platform === k ? 'selected' : ''}>${v.label}</option>`).join('');
   const actions = [];
   if (!isNew) {
     actions.push({
@@ -339,6 +356,7 @@ function openEdit(m) {
       target.discord = discord;
       target.email = email;
       target.note = $('#fNote').value.trim();
+      target.platform = $('#fPlat').value;
       if (isNew) state.members.push(target);
       await commit();
       toast(isNew ? 'Membro adicionado' : 'Alterações salvas');
@@ -346,6 +364,7 @@ function openEdit(m) {
   });
   openModal(isNew ? 'Adicionar membro' : 'Editar membro', `
     <label>Categoria <select id="fCat">${opts}</select></label>
+    <label>Plataforma <select id="fPlat"><option value="">Sem plataforma</option>${platOpts}</select></label>
     <label>ID do Discord <input id="fDiscord" value="${esc(m ? m.discord : '')}" placeholder="123456789012345678 ou <@123…>"></label>
     <label>E-mail / usuário <input id="fEmail" value="${esc(m ? m.email : '')}" placeholder="email@exemplo.com"></label>
     <label>Observação (opcional) <input id="fNote" value="${esc(m ? m.note : '')}"></label>`, actions);
@@ -432,6 +451,7 @@ document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () 
 }));
 $('#search').addEventListener('input', render);
 $('#filter').addEventListener('change', render);
+$('#platFilter').addEventListener('change', render);
 $('#addBtn').addEventListener('click', () => openEdit(null));
 $('#prevMonth').addEventListener('click', () => { viewMonth = shiftMonth(viewMonth, -1); render(); });
 $('#nextMonth').addEventListener('click', () => { viewMonth = shiftMonth(viewMonth, 1); render(); });

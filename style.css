@@ -97,7 +97,7 @@ main { max-width: 1000px; margin: 0 auto; padding: 20px 16px 60px; }
 .item {
   background: var(--panel); border: 1px solid transparent; border-radius: var(--radius);
   padding: 12px 14px;
-  display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px 16px; align-items: center;
+  display: grid; grid-template-columns: 150px 1fr 1fr auto; gap: 10px 16px; align-items: center;
 }
 .item.done { border-color: rgba(35, 165, 90, .4); }
 .field { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -114,6 +114,20 @@ main { max-width: 1000px; margin: 0 auto; padding: 20px 16px 60px; }
 }
 .pill.pending { background: var(--warn-bg); color: var(--warn); }
 .pill.done { background: var(--ok-bg); color: var(--ok); }
+/* Tags de plataforma */
+.ptag {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  font-size: 13px; font-weight: 700; letter-spacing: .02em;
+  padding: 6px 12px; border-radius: 999px; border: 1px solid; white-space: nowrap;
+  justify-self: start;
+}
+.ptag .pico { font-size: 14px; line-height: 1; }
+.ptag.android { color: #3ddc84; background: rgba(61, 220, 132, .12); border-color: rgba(61, 220, 132, .45); }
+.ptag.tablet  { color: #2dd4bf; background: rgba(45, 212, 191, .12); border-color: rgba(45, 212, 191, .45); }
+.ptag.ios     { color: #e5e7eb; background: rgba(229, 231, 235, .10); border-color: rgba(229, 231, 235, .40); }
+.ptag.desktop { color: #7c8cff; background: rgba(88, 101, 242, .16); border-color: rgba(88, 101, 242, .55); }
+.ptag.none    { color: var(--muted); background: transparent; border-color: var(--line); border-style: dashed; font-weight: 500; }
+
 .note { grid-column: 1 / -1; font-size: 13px; color: var(--muted); margin-top: -4px; }
 
 /* Modal */
