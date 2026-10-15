@@ -19,6 +19,7 @@ const LS = {
   pw: 'vip.pw',             // senha, só se "lembrar neste aparelho"
   token: 'vip.ghToken',     // token do GitHub para salvar
   tab: 'vip.tab',
+  last: 'vip.lastCopied',  // último ID/e-mail copiado (para destacar)
 };
 
 // ===== Estado =====
@@ -28,6 +29,7 @@ let remoteBlob = null;     // blob criptografado lido do repo
 let baseUpdatedAt = null;  // updatedAt da versão do GitHub que serviu de base para as edições
 let currentCat = lsGet(LS.tab) || 'betas';
 let viewMonth = monthKey(new Date());
+let lastCopied = (() => { try { return JSON.parse(lsGet(LS.last)) || {}; } catch { return {}; } })();
 
 const $ = (s) => document.querySelector(s);
 
@@ -356,8 +358,9 @@ function render() {
   $('#list').innerHTML = items.map((m, i) => {
     const done = isDone(m);
     const pkey = PLATFORMS[m.platform] ? m.platform : 'none';
+    const isLast = lastCopied.uid === m.uid;
     const field = (lbl, val, kind) => `
-      <div class="field">
+      <div class="field f-${kind} ${isLast && lastCopied.kind === kind ? 'last-field' : ''}">
         <div class="field-text">
           <span class="lbl">${lbl}</span>
           <span class="val ${val ? '' : 'empty'}" title="${esc(val)}">${val ? esc(val) : 'vazio'}</span>
@@ -365,12 +368,12 @@ function render() {
         ${val ? `<button class="btn small copy" data-act="copy" data-kind="${kind}" data-uid="${m.uid}"${kind === 'id' ? ' title="Copia como &lt;@id&gt;"' : ''}>${copyIc}Copiar</button>` : ''}
       </div>`;
     return `
-      <li class="item p-${pkey} ${done ? 'done' : ''}" style="animation-delay:${Math.min(i, 15) * 25}ms">
+      <li class="item p-${pkey} ${done ? 'done' : ''} ${isLast ? 'last' : ''}" data-uid="${m.uid}" style="animation-delay:${Math.min(i, 15) * 25}ms">
         <div class="who">
           <div class="avatar">${esc(initials(m.name))}</div>
           <div class="who-text">
             <div class="name ${m.name ? '' : 'empty'}" title="${esc(m.name)}">${m.name ? esc(m.name) : 'sem nome'}</div>
-            ${platTag(m.platform)}
+            <div class="tags">${platTag(m.platform)}<span class="last-badge">Último copiado</span></div>
           </div>
         </div>
         ${field('Discord', m.discord, 'id')}
@@ -414,11 +417,29 @@ function openModal(title, bodyHtml, actions) {
   if (first) first.focus();
 }
 
-// Copiar → confirmar entrega
+// Destaca o último membro copiado (sem redesenhar a lista)
+function markLastCopied(memberUid, kind) {
+  kind = kind === 'email' ? 'email' : 'id';
+  lastCopied = { uid: memberUid, kind };
+  lsSet(LS.last, JSON.stringify(lastCopied));
+  document.querySelectorAll('.item.last').forEach((el) => el.classList.remove('last'));
+  document.querySelectorAll('.field.last-field').forEach((el) => el.classList.remove('last-field'));
+  const li = document.querySelector(`.item[data-uid="${memberUid}"]`);
+  if (!li) return;
+  li.classList.add('last');
+  li.querySelector(`.f-${kind}`)?.classList.add('last-field');
+  // reinicia a animação de pulso
+  li.style.animation = 'none';
+  void li.offsetWidth;
+  li.style.animation = '';
+}
+
+// Copiar
 async function onCopy(m, kind, btn) {
   const text = kind === 'email' ? m.email : `<@${m.discord}>`;
   await copyText(text);
   toast(`Copiado: ${text}`);
+  markLastCopied(m.uid, kind);
   if (btn) {
     const html = btn.innerHTML;
     btn.classList.add('copied');
