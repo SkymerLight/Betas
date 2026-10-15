@@ -418,3 +418,5 @@ dialog h2 { font-size: 20px; margin-bottom: 18px; }
   30%  { box-shadow: 0 0 0 6px rgba(245, 196, 81, .35), 0 0 50px 0 rgba(245, 196, 81, .6); transform: scale(1.008); }
   100% { box-shadow: 0 0 0 2px var(--gold), 0 0 38px -4px rgba(245, 196, 81, .6); transform: scale(1); }
 }
+
+.you.gold { color: var(--gold); background: rgba(245, 196, 81, .15); }

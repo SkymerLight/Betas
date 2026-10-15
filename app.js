@@ -108,11 +108,11 @@ async function pwKey(pw, salt, iter) {
 }
 const dataKey = (raw) => crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt']);
 
-async function makeSlot(label, pw, id = uid()) {
+async function makeSlot(label, pw, id = uid(), role = 'member') {
   const salt = rand(16);
   const iv = rand(12);
   const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await pwKey(pw, salt, ITERATIONS), dekRaw);
-  return { id, label, iter: ITERATIONS, salt: b64(salt), iv: b64(iv), key: b64(ct) };
+  return { id, label, role, iter: ITERATIONS, salt: b64(salt), iv: b64(iv), key: b64(ct) };
 }
 
 async function encryptData(obj) {
@@ -246,8 +246,16 @@ async function commit() {
 
 function applyOpened(o) {
   state = o.data;
-  if (o.dek) { dekRaw = o.dek; slots = o.slots; mySlotId = o.slotId; }
+  if (o.dek) {
+    dekRaw = o.dek;
+    // Senhas antigas sem papel: a primeira (a original) é a principal
+    slots = o.slots.map((x, i) => (x.role ? x : { ...x, role: i === 0 ? 'admin' : 'member' }));
+    mySlotId = o.slotId;
+  }
 }
+
+function mySlot() { return slots.find((x) => x.id === mySlotId); }
+function isAdmin() { const me = mySlot(); return Boolean(me && me.role === 'admin'); }
 
 // ===== Desbloqueio =====
 async function unlock(pw, remember) {
@@ -267,7 +275,7 @@ async function unlock(pw, remember) {
   if (!dekRaw) {
     // Dados no formato antigo (uma senha só): converte para o formato com várias senhas
     dekRaw = rand(32);
-    const sl = await makeSlot('Principal', pw);
+    const sl = await makeSlot('Principal', pw, uid(), 'admin');
     slots = [sl];
     mySlotId = sl.id;
     lsSet(LS.local, JSON.stringify(await encryptData(state)));
@@ -546,18 +554,20 @@ function openTokenModal(thenSave) {
 }
 
 function openSettings() {
-  const me = slots.find((x) => x.id === mySlotId);
+  const me = mySlot();
+  const admin = isAdmin();
+  const actions = [];
+  if (admin) {
+    actions.push({ label: 'Senhas de acesso', onClick: () => { setTimeout(openPasswords, 0); } });
+    actions.push({ label: 'Token do GitHub', onClick: () => { setTimeout(() => openTokenModal(false), 0); } });
+  }
+  actions.push({ label: 'Trocar minha senha', onClick: () => { setTimeout(openChangePw, 0); } });
+  actions.push({ label: 'Exportar backup', onClick: exportBackup });
+  actions.push({ label: 'Sair', cls: 'danger', onClick: () => { lsDel(LS.pw); location.reload(); } });
   openModal('Configurações', `
-    <p class="muted">Você entrou como <b>${esc(me ? me.label : '—')}</b>. Edições ficam salvas neste navegador na hora;
-      use “Salvar no GitHub” para gravar no repositório (e aparecer para os outros).</p>`, [
-    { label: 'Senhas de acesso', onClick: () => { setTimeout(openPasswords, 0); } },
-    { label: 'Trocar minha senha', onClick: () => { setTimeout(openChangePw, 0); } },
-    { label: 'Token do GitHub', onClick: () => { setTimeout(() => openTokenModal(false), 0); } },
-    { label: 'Exportar backup', onClick: exportBackup },
-    {
-      label: 'Sair', cls: 'danger', onClick: () => { lsDel(LS.pw); location.reload(); },
-    },
-  ]);
+    <p class="muted">Você entrou como <b>${esc(me ? me.label : '—')}</b>${admin ? ' <span class="you gold">principal</span>' : ''}.
+      Edições ficam salvas neste navegador na hora; use “Salvar no GitHub” para gravar no repositório
+      (e aparecer para os outros).</p>`, actions);
 }
 
 function pwValid(a, b) {
@@ -567,10 +577,11 @@ function pwValid(a, b) {
 }
 
 function openPasswords() {
+  if (!isAdmin()) return;
   const list = slots.map((sl) => `
     <div class="slot">
       <div class="slot-ic">${esc(initials(sl.label))}</div>
-      <div class="slot-name">${esc(sl.label)}${sl.id === mySlotId ? ' <span class="you">você</span>' : ''}</div>
+      <div class="slot-name">${esc(sl.label)}${sl.id === mySlotId ? ' <span class="you">você</span>' : ''}${sl.role === 'admin' ? ' <span class="you gold">principal</span>' : ''}</div>
       <button type="button" class="btn small ghost" data-rn="${sl.id}">Renomear</button>
       ${sl.id === mySlotId ? '' : `<button type="button" class="btn small danger" data-rm="${sl.id}">Remover</button>`}
     </div>`).join('');
@@ -592,7 +603,7 @@ function openPasswords() {
         const label = $('#fLabel').value.trim();
         if (!label) { toast('Coloque o nome de quem vai usar'); return false; }
         if (!pwValid($('#fPw1').value, $('#fPw2').value)) return false;
-        slots = [...slots, await makeSlot(label, $('#fPw1').value)];
+        slots = [...slots, await makeSlot(label, $('#fPw1').value, uid(), 'member')];
         await commit();
         toast(`Senha de ${label} adicionada — salve no GitHub`);
         setTimeout(openPasswords, 0);
@@ -631,7 +642,7 @@ function openChangePw() {
         const a = $('#fPw1').value;
         if (!pwValid(a, $('#fPw2').value)) return false;
         const me = slots.find((x) => x.id === mySlotId);
-        const fresh = await makeSlot(me ? me.label : 'Principal', a, mySlotId);
+        const fresh = await makeSlot(me ? me.label : 'Principal', a, mySlotId, me ? me.role : 'member');
         slots = slots.map((x) => (x.id === mySlotId ? fresh : x));
         password = a;
         if (lsGet(LS.pw)) lsSet(LS.pw, a);
