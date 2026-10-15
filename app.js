@@ -25,6 +25,7 @@ const LS = {
 let state = null;          // { updatedAt, members: [...] }
 let password = null;
 let remoteBlob = null;     // blob criptografado lido do repo
+let baseUpdatedAt = null;  // updatedAt da versão do GitHub que serviu de base para as edições
 let currentCat = lsGet(LS.tab) || 'betas';
 let viewMonth = monthKey(new Date());
 
@@ -85,30 +86,57 @@ async function copyText(text) {
 }
 
 // ===== Criptografia (PBKDF2 + AES-GCM) =====
+// Os dados são cifrados com uma chave aleatória (DEK). Cada senha tem um "slot" que guarda
+// essa chave cifrada com a senha — assim mais de uma pessoa abre o mesmo painel.
 const te = new TextEncoder();
 const td = new TextDecoder();
 const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
 const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+const rand = (n) => crypto.getRandomValues(new Uint8Array(n));
 
-async function deriveKey(pw, salt, iter) {
+let dekRaw = null;   // chave dos dados (32 bytes)
+let slots = [];      // [{ id, label, iter, salt, iv, key }]
+let mySlotId = null; // slot da senha usada para entrar
+
+async function pwKey(pw, salt, iter) {
   const base = await crypto.subtle.importKey('raw', te.encode(pw), 'PBKDF2', false, ['deriveKey']);
   return crypto.subtle.deriveKey(
     { name: 'PBKDF2', salt, iterations: iter, hash: 'SHA-256' },
     base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
 }
+const dataKey = (raw) => crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt']);
 
-async function encryptData(obj, pw) {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const key = await deriveKey(pw, salt, ITERATIONS);
-  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, te.encode(JSON.stringify(obj)));
-  return { v: 1, iter: ITERATIONS, salt: b64(salt), iv: b64(iv), data: b64(ct) };
+async function makeSlot(label, pw, id = uid()) {
+  const salt = rand(16);
+  const iv = rand(12);
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await pwKey(pw, salt, ITERATIONS), dekRaw);
+  return { id, label, iter: ITERATIONS, salt: b64(salt), iv: b64(iv), key: b64(ct) };
 }
 
-async function decryptData(blob, pw) {
-  const key = await deriveKey(pw, unb64(blob.salt), blob.iter);
-  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(blob.iv) }, key, unb64(blob.data));
-  return JSON.parse(td.decode(pt));
+async function encryptData(obj) {
+  const iv = rand(12);
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await dataKey(dekRaw), te.encode(JSON.stringify(obj)));
+  return { v: 2, slots, iv: b64(iv), data: b64(ct) };
+}
+
+// Abre um blob com a senha → { data, dek, slots, slotId }. Lança OperationError se nenhuma senha bater.
+async function openBlob(blob, pw) {
+  if (blob.v !== 2) {
+    // formato antigo: uma senha só, sem slots
+    const key = await pwKey(pw, unb64(blob.salt), blob.iter);
+    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(blob.iv) }, key, unb64(blob.data));
+    return { data: JSON.parse(td.decode(pt)), dek: null, slots: null, slotId: null };
+  }
+  for (const sl of blob.slots) {
+    let dek;
+    try {
+      const k = await pwKey(pw, unb64(sl.salt), sl.iter);
+      dek = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(sl.iv) }, k, unb64(sl.key)));
+    } catch { continue; }
+    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(blob.iv) }, await dataKey(dek), unb64(blob.data));
+    return { data: JSON.parse(td.decode(pt)), dek, slots: blob.slots, slotId: sl.id };
+  }
+  throw new DOMException('Senha incorreta', 'OperationError');
 }
 
 // ===== GitHub =====
@@ -139,14 +167,25 @@ async function loadRemote() {
   return r.json();
 }
 
-async function saveToGitHub() {
+async function saveToGitHub(force = false) {
   if (!lsGet(LS.token)) { openTokenModal(true); return; }
   const btn = $('#saveGh');
   btn.disabled = true;
   btn.querySelector('span').textContent = 'Salvando…';
   try {
     const current = await ghGetFile();
-    const blob = await encryptData(state, password);
+    if (current && !force) {
+      let remote;
+      try { remote = await openBlob(current.blob, password); } catch {
+        throw new Error('sua senha não abre mais a versão do GitHub (foi removida ou trocada).');
+      }
+      // Outra pessoa salvou depois que você abriu o painel?
+      if (remote.data.updatedAt > baseUpdatedAt && remote.data.updatedAt !== state.updatedAt) {
+        openConflict(remote, current.blob);
+        return;
+      }
+    }
+    const blob = await encryptData(state);
     const body = {
       message: `Atualiza membros (${new Date().toLocaleString('pt-BR')})`,
       content: btoa(JSON.stringify(blob, null, 2) + '\n'),
@@ -155,9 +194,11 @@ async function saveToGitHub() {
     if (current) body.sha = current.sha;
     const r = await fetch(`https://api.github.com/repos/${REPO}/contents/${DATA_FILE}`,
       { method: 'PUT', headers: ghHeaders(), body: JSON.stringify(body) });
-    if (r.status === 401 || r.status === 403) throw new Error('Token sem permissão ou inválido.');
+    if (r.status === 401 || r.status === 403 || r.status === 404) throw new Error('token sem permissão de escrita neste repositório.');
+    if (r.status === 409) throw new Error('o arquivo mudou no GitHub enquanto salvava, tente de novo.');
     if (!r.ok) throw new Error(`GitHub respondeu ${r.status}`);
     remoteBlob = blob;
+    baseUpdatedAt = state.updatedAt;
     lsDel(LS.dirty);
     toast('Salvo no GitHub ✓');
   } catch (e) {
@@ -169,33 +210,73 @@ async function saveToGitHub() {
   }
 }
 
+function openConflict(remote, blob) {
+  const who = remote.data.updatedBy ? ` por <b>${esc(remote.data.updatedBy)}</b>` : '';
+  openModal('Outra pessoa salvou antes', `
+    <p>O painel foi salvo no GitHub${who} em <b>${esc(fmtDate(remote.data.updatedAt))}</b>, depois que você abriu.</p>
+    <p class="muted">Se você sobrescrever, as alterações dessa pessoa serão perdidas. Se carregar a versão do GitHub,
+      as suas alterações não salvas é que serão perdidas.</p>`, [
+    {
+      label: 'Carregar versão do GitHub', cls: 'left', onClick: () => {
+        applyOpened(remote);
+        remoteBlob = blob;
+        baseUpdatedAt = remote.data.updatedAt;
+        lsSet(LS.local, JSON.stringify(blob));
+        lsDel(LS.dirty);
+        render();
+        toast('Versão do GitHub carregada');
+      },
+    },
+    { label: 'Cancelar' },
+    { label: 'Sobrescrever', cls: 'danger', onClick: () => { setTimeout(() => saveToGitHub(true), 0); } },
+  ]);
+}
+
 // ===== Persistência local =====
 async function commit() {
   state.updatedAt = new Date().toISOString();
-  lsSet(LS.local, JSON.stringify(await encryptData(state, password)));
+  const me = slots.find((x) => x.id === mySlotId);
+  if (me) state.updatedBy = me.label;
+  lsSet(LS.local, JSON.stringify(await encryptData(state)));
   lsSet(LS.dirty, '1');
   render();
+}
+
+function applyOpened(o) {
+  state = o.data;
+  if (o.dek) { dekRaw = o.dek; slots = o.slots; mySlotId = o.slotId; }
 }
 
 // ===== Desbloqueio =====
 async function unlock(pw, remember) {
   if (!remoteBlob) remoteBlob = await loadRemote();
-  const remote = await decryptData(remoteBlob, pw); // lança erro se a senha estiver errada
+  const remote = await openBlob(remoteBlob, pw); // lança erro se a senha estiver errada
 
   let local = null;
   const raw = lsGet(LS.local);
-  if (raw) { try { local = await decryptData(JSON.parse(raw), pw); } catch {} }
+  if (raw) { try { local = await openBlob(JSON.parse(raw), pw); } catch {} }
 
   // Usa a versão mais nova entre o repo e a cópia local
-  if (local && local.updatedAt > remote.updatedAt) {
-    state = local;
+  const useLocal = local && local.data.updatedAt > remote.data.updatedAt;
+  applyOpened(useLocal ? local : remote);
+  baseUpdatedAt = remote.data.updatedAt;
+  password = pw;
+
+  if (!dekRaw) {
+    // Dados no formato antigo (uma senha só): converte para o formato com várias senhas
+    dekRaw = rand(32);
+    const sl = await makeSlot('Principal', pw);
+    slots = [sl];
+    mySlotId = sl.id;
+    lsSet(LS.local, JSON.stringify(await encryptData(state)));
+    lsSet(LS.dirty, '1');
+    setTimeout(() => toast('Formato atualizado — clique em “Salvar no GitHub”'), 400);
+  } else if (useLocal) {
     lsSet(LS.dirty, '1');
   } else {
-    state = remote;
     lsDel(LS.dirty);
     lsSet(LS.local, JSON.stringify(remoteBlob));
   }
-  password = pw;
   if (remember) lsSet(LS.pw, pw);
 
   $('#lock').hidden = true;
@@ -444,11 +525,13 @@ function openTokenModal(thenSave) {
 }
 
 function openSettings() {
+  const me = slots.find((x) => x.id === mySlotId);
   openModal('Configurações', `
-    <p class="muted">Edições ficam salvas neste navegador na hora. Use “Salvar no GitHub” para gravar no repositório
-      (e ver em outros aparelhos).</p>`, [
+    <p class="muted">Você entrou como <b>${esc(me ? me.label : '—')}</b>. Edições ficam salvas neste navegador na hora;
+      use “Salvar no GitHub” para gravar no repositório (e aparecer para os outros).</p>`, [
+    { label: 'Senhas de acesso', onClick: () => { setTimeout(openPasswords, 0); } },
+    { label: 'Trocar minha senha', onClick: () => { setTimeout(openChangePw, 0); } },
     { label: 'Token do GitHub', onClick: () => { setTimeout(() => openTokenModal(false), 0); } },
-    { label: 'Trocar senha', onClick: () => { setTimeout(openChangePw, 0); } },
     { label: 'Exportar backup', onClick: exportBackup },
     {
       label: 'Sair', cls: 'danger', onClick: () => { lsDel(LS.pw); location.reload(); },
@@ -456,17 +539,79 @@ function openSettings() {
   ]);
 }
 
+function pwValid(a, b) {
+  if (a.length < 6) { toast('Use pelo menos 6 caracteres'); return false; }
+  if (a !== b) { toast('As senhas não conferem'); return false; }
+  return true;
+}
+
+function openPasswords() {
+  const list = slots.map((sl) => `
+    <div class="slot">
+      <div class="slot-ic">${esc(initials(sl.label))}</div>
+      <div class="slot-name">${esc(sl.label)}${sl.id === mySlotId ? ' <span class="you">você</span>' : ''}</div>
+      <button type="button" class="btn small ghost" data-rn="${sl.id}">Renomear</button>
+      ${sl.id === mySlotId ? '' : `<button type="button" class="btn small danger" data-rm="${sl.id}">Remover</button>`}
+    </div>`).join('');
+  openModal('Senhas de acesso', `
+    <p class="muted">Cada pessoa tem a própria senha e todas abrem o mesmo painel.</p>
+    <div class="slots">${list}</div>
+    <div class="add-box">
+      <strong>Adicionar senha</strong>
+      <label>Nome de quem vai usar <input id="fLabel" placeholder="Ex.: João"></label>
+      <div class="row2">
+        <label>Senha <input id="fPw1" type="password" autocomplete="new-password"></label>
+        <label>Repita <input id="fPw2" type="password" autocomplete="new-password"></label>
+      </div>
+    </div>
+    <p class="muted">Depois de adicionar ou remover, clique em “Salvar no GitHub” para valer no site publicado.</p>`, [
+    { label: 'Fechar' },
+    {
+      label: 'Adicionar', cls: 'primary', onClick: async () => {
+        const label = $('#fLabel').value.trim();
+        if (!label) { toast('Coloque o nome de quem vai usar'); return false; }
+        if (!pwValid($('#fPw1').value, $('#fPw2').value)) return false;
+        slots = [...slots, await makeSlot(label, $('#fPw1').value)];
+        await commit();
+        toast(`Senha de ${label} adicionada — salve no GitHub`);
+        setTimeout(openPasswords, 0);
+      },
+    },
+  ]);
+  $('#modalBody').querySelectorAll('[data-rm]').forEach((b) => b.addEventListener('click', async () => {
+    const sl = slots.find((x) => x.id === b.dataset.rm);
+    if (!sl || !confirm(`Remover a senha de ${sl.label}?`)) return;
+    slots = slots.filter((x) => x.id !== sl.id);
+    await commit();
+    toast(`Senha de ${sl.label} removida — salve no GitHub`);
+    openPasswords();
+  }));
+  $('#modalBody').querySelectorAll('[data-rn]').forEach((b) => b.addEventListener('click', async () => {
+    const sl = slots.find((x) => x.id === b.dataset.rn);
+    const name = sl && prompt('Novo nome:', sl.label);
+    if (!name || !name.trim()) return;
+    slots = slots.map((x) => (x.id === sl.id ? { ...x, label: name.trim() } : x));
+    await commit();
+    openPasswords();
+  }));
+  const label = $('#fLabel');
+  if (label) label.focus();
+}
+
 function openChangePw() {
-  openModal('Trocar senha', `
+  openModal('Trocar minha senha', `
     <label>Nova senha <input id="fPw1" type="password" autocomplete="new-password"></label>
     <label>Repita a nova senha <input id="fPw2" type="password" autocomplete="new-password"></label>
-    <p class="muted">Depois clique em “Salvar no GitHub” para a nova senha valer no site publicado.</p>`, [
+    <p class="muted">Só a sua senha muda; as outras pessoas continuam com as delas.
+      Depois clique em “Salvar no GitHub” para valer no site publicado.</p>`, [
     { label: 'Cancelar' },
     {
       label: 'Trocar', cls: 'primary', onClick: async () => {
-        const a = $('#fPw1').value, b = $('#fPw2').value;
-        if (a.length < 6) { toast('Use pelo menos 6 caracteres'); return false; }
-        if (a !== b) { toast('As senhas não conferem'); return false; }
+        const a = $('#fPw1').value;
+        if (!pwValid(a, $('#fPw2').value)) return false;
+        const me = slots.find((x) => x.id === mySlotId);
+        const fresh = await makeSlot(me ? me.label : 'Principal', a, mySlotId);
+        slots = slots.map((x) => (x.id === mySlotId ? fresh : x));
         password = a;
         if (lsGet(LS.pw)) lsSet(LS.pw, a);
         await commit();
