@@ -308,6 +308,12 @@ $('#lockForm').addEventListener('submit', async (e) => {
 });
 
 // ===== Renderização =====
+// Plataformas do membro (aceita o formato antigo com uma só em m.platform)
+function platsOf(m) {
+  const list = Array.isArray(m.platforms) ? m.platforms : (m.platform ? [m.platform] : []);
+  return list.filter((k) => PLATFORMS[k]);
+}
+
 function platTag(key) {
   const p = PLATFORMS[key];
   if (!p) return '<span class="ptag none">Sem plataforma</span>';
@@ -358,14 +364,16 @@ function render() {
     if (q && !`${m.name || ''} ${m.discord} ${m.email} ${m.note || ''}`.toLowerCase().includes(q)) return false;
     if (filter === 'pending' && isDone(m)) return false;
     if (filter === 'done' && !isDone(m)) return false;
-    if (plat !== 'all' && (m.platform || 'none') !== plat) return false;
+    if (plat === 'none' && platsOf(m).length) return false;
+    if (plat !== 'all' && plat !== 'none' && !platsOf(m).includes(plat)) return false;
     return true;
   });
 
   const copyIc = '<svg class="ic" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
   $('#list').innerHTML = items.map((m, i) => {
     const done = isDone(m);
-    const pkey = PLATFORMS[m.platform] ? m.platform : 'none';
+    const plats = platsOf(m);
+    const pkey = plats[0] || 'none';
     const isLast = lastCopied.uid === m.uid;
     const field = (lbl, val, kind) => `
       <div class="field f-${kind} ${isLast && lastCopied.kind === kind ? 'last-field' : ''}">
@@ -381,7 +389,7 @@ function render() {
           <div class="avatar">${esc(initials(m.name))}</div>
           <div class="who-text">
             <div class="name ${m.name ? '' : 'empty'}" title="${esc(m.name)}">${m.name ? esc(m.name) : 'sem nome'}</div>
-            <div class="tags">${platTag(m.platform)}<span class="last-badge">Último copiado</span></div>
+            <div class="tags">${plats.length ? plats.map(platTag).join('') : platTag('')}<span class="last-badge">Último copiado</span></div>
           </div>
         </div>
         ${field('Discord', m.discord, 'id')}
@@ -421,7 +429,7 @@ function openModal(title, bodyHtml, actions) {
     box.appendChild(b);
   }
   $('#modal').showModal();
-  const first = $('#modalBody input');
+  const first = $('#modalBody input:not([type=checkbox])');
   if (first) first.focus();
 }
 
@@ -475,8 +483,10 @@ function openEdit(m) {
   const isNew = !m;
   const opts = Object.entries(CATS).map(([k, v]) =>
     `<option value="${k}" ${(m ? m.cat : currentCat) === k ? 'selected' : ''}>${v}</option>`).join('');
-  const platOpts = Object.entries(PLATFORMS).map(([k, v]) =>
-    `<option value="${k}" ${m && m.platform === k ? 'selected' : ''}>${v.label}</option>`).join('');
+  const cur = m ? platsOf(m) : [];
+  const platOpts = Object.entries(PLATFORMS).map(([k, v]) => `
+    <label class="pchk ${k}"><input type="checkbox" name="fPlat" value="${k}" ${cur.includes(k) ? 'checked' : ''}>
+      <span>${v.icon ? `${v.icon} ` : ''}${v.label}</span></label>`).join('');
   const actions = [];
   if (!isNew) {
     actions.push({
@@ -500,7 +510,8 @@ function openEdit(m) {
       target.discord = discord;
       target.email = email;
       target.note = $('#fNote').value.trim();
-      target.platform = $('#fPlat').value;
+      target.platforms = [...document.querySelectorAll('input[name="fPlat"]:checked')].map((x) => x.value);
+      delete target.platform;
       target.delivered = target.delivered || {};
       const del = $('#fDel').value;
       if (del) target.delivered[viewMonth] = new Date(del).toISOString();
@@ -511,9 +522,10 @@ function openEdit(m) {
     },
   });
   openModal(isNew ? 'Adicionar membro' : 'Editar membro', `
-    <div class="row2">
-      <label>Categoria <select id="fCat">${opts}</select></label>
-      <label>Plataforma <select id="fPlat"><option value="">Sem plataforma</option>${platOpts}</select></label>
+    <label>Categoria <select id="fCat">${opts}</select></label>
+    <div class="pgroup">
+      <span class="pgroup-lbl">Plataformas <small>(marque uma ou mais)</small></span>
+      <div class="pchks">${platOpts}</div>
     </div>
     <label>Nome <input id="fName" value="${esc(m ? m.name : '')}" placeholder="Nome ou apelido"></label>
     <label>ID do Discord <input id="fDiscord" value="${esc(m ? m.discord : '')}" placeholder="123456789012345678 ou <@123…>"></label>

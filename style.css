@@ -320,7 +320,7 @@ dialog {
   box-shadow: 0 40px 100px -30px rgba(0, 0, 0, .9);
 }
 dialog[open] { animation: pop .18s ease both; }
-@keyframes pop { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: none; } }
+@keyframes pop { from { transform: scale(.97); } to { transform: none; } }
 dialog::backdrop { background: rgba(5, 6, 10, .7); backdrop-filter: blur(4px); }
 dialog h2 { font-size: 20px; margin-bottom: 18px; }
 #modalBody { display: grid; gap: 13px; }
@@ -420,3 +420,21 @@ dialog h2 { font-size: 20px; margin-bottom: 18px; }
 }
 
 .you.gold { color: var(--gold); background: rgba(245, 196, 81, .15); }
+
+/* Seleção de plataformas (várias) no Editar */
+.pgroup { display: grid; gap: 7px; }
+.pgroup-lbl { font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.pgroup-lbl small { font-weight: 500; opacity: .8; }
+.pchks { display: flex; flex-wrap: wrap; gap: 8px; }
+#modalBody label.pchk { display: inline-flex; cursor: pointer; gap: 0; }
+.pchk input { position: absolute; opacity: 0; pointer-events: none; width: auto; }
+.pchk span {
+  font-size: 13px; font-weight: 700; padding: 7px 13px; border-radius: 999px;
+  border: 1px dashed var(--line-strong); color: var(--muted); transition: all .15s; user-select: none;
+}
+.pchk:hover span { color: var(--text); border-color: rgba(255, 255, 255, .3); }
+.pchk input:focus-visible + span { box-shadow: 0 0 0 3px rgba(124, 92, 255, .35); }
+.pchk.android input:checked + span { color: #3ddc84; background: rgba(61, 220, 132, .12); border: 1px solid rgba(61, 220, 132, .5); }
+.pchk.tablet  input:checked + span { color: #2dd4bf; background: rgba(45, 212, 191, .12); border: 1px solid rgba(45, 212, 191, .5); }
+.pchk.ios     input:checked + span { color: #e5e7eb; background: rgba(229, 231, 235, .1); border: 1px solid rgba(229, 231, 235, .45); }
+.pchk.desktop input:checked + span { color: #9aa6ff; background: rgba(124, 140, 255, .14); border: 1px solid rgba(124, 140, 255, .55); }
