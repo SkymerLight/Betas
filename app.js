@@ -169,11 +169,31 @@ async function loadRemote() {
   return r.json();
 }
 
-async function saveToGitHub(force = false) {
-  if (!lsGet(LS.token)) { openTokenModal(true); return; }
+// ===== Salvamento automático =====
+const AUTOSAVE_MS = 10000;  // salva no GitHub 10 s depois da última alteração
+let autoTimer = null;
+let saving = false;
+
+function scheduleAutoSave() {
+  clearTimeout(autoTimer);
+  autoTimer = null;
+  if (!lsGet(LS.token)) return; // sem token neste navegador: fica só local
+  autoTimer = setTimeout(() => { autoTimer = null; saveToGitHub({ auto: true }); }, AUTOSAVE_MS);
+  renderSync();
+}
+
+async function saveToGitHub({ force = false, auto = false } = {}) {
+  if (!lsGet(LS.token)) { if (!auto) openTokenModal(true); return; }
+  if (saving) { if (auto) scheduleAutoSave(); return; }
+  if (auto && !lsGet(LS.dirty)) return;
+  clearTimeout(autoTimer);
+  autoTimer = null;
+  saving = true;
+  const savedAt = state.updatedAt;
   const btn = $('#saveGh');
   btn.disabled = true;
   btn.querySelector('span').textContent = 'Salvando…';
+  renderSync();
   try {
     const current = await ghGetFile();
     if (current && !force) {
@@ -200,14 +220,16 @@ async function saveToGitHub(force = false) {
     if (r.status === 409) throw new Error('o arquivo mudou no GitHub enquanto salvava, tente de novo.');
     if (!r.ok) throw new Error(`GitHub respondeu ${r.status}`);
     remoteBlob = blob;
-    baseUpdatedAt = state.updatedAt;
-    lsDel(LS.dirty);
-    toast('Salvo no GitHub ✓');
+    baseUpdatedAt = savedAt;
+    if (state.updatedAt === savedAt) lsDel(LS.dirty); // mexeu durante o envio? continua pendente
+    if (!auto) toast('Salvo no GitHub ✓');
   } catch (e) {
-    toast('Erro ao salvar: ' + e.message);
+    toast((auto ? 'Erro no salvamento automático: ' : 'Erro ao salvar: ') + e.message);
   } finally {
+    saving = false;
     btn.disabled = false;
     btn.querySelector('span').textContent = 'Salvar no GitHub';
+    if (lsGet(LS.dirty) && state.updatedAt !== savedAt) scheduleAutoSave();
     renderSync();
   }
 }
@@ -230,7 +252,7 @@ function openConflict(remote, blob) {
       },
     },
     { label: 'Cancelar' },
-    { label: 'Sobrescrever', cls: 'danger', onClick: () => { setTimeout(() => saveToGitHub(true), 0); } },
+    { label: 'Sobrescrever', cls: 'danger', onClick: () => { setTimeout(() => saveToGitHub({ force: true }), 0); } },
   ]);
 }
 
@@ -242,6 +264,7 @@ async function commit() {
   lsSet(LS.local, JSON.stringify(await encryptData(state)));
   lsSet(LS.dirty, '1');
   render();
+  scheduleAutoSave();
 }
 
 function applyOpened(o) {
@@ -292,6 +315,7 @@ async function unlock(pw, remember) {
   $('#lock').hidden = true;
   $('#app').hidden = false;
   render();
+  if (lsGet(LS.dirty)) scheduleAutoSave();
 }
 
 $('#lockForm').addEventListener('submit', async (e) => {
@@ -330,7 +354,13 @@ function isDone(m) { return Boolean(m.delivered && m.delivered[viewMonth]); }
 
 function renderSync() {
   const el = $('#syncState');
-  if (lsGet(LS.dirty)) {
+  if (saving) {
+    el.textContent = '↻ Salvando no GitHub…';
+    el.className = 'sync dirty';
+  } else if (lsGet(LS.dirty) && autoTimer) {
+    el.textContent = '● Salvando automaticamente…';
+    el.className = 'sync dirty';
+  } else if (lsGet(LS.dirty)) {
     el.textContent = '● Não salvo no GitHub';
     el.className = 'sync dirty';
   } else {
@@ -559,7 +589,7 @@ function openTokenModal(thenSave) {
         if (!v) return false;
         lsSet(LS.token, v);
         toast('Token salvo');
-        if (thenSave) setTimeout(saveToGitHub, 0);
+        if (thenSave) setTimeout(() => saveToGitHub(), 0);
       },
     },
   ]);
@@ -696,7 +726,7 @@ $('#platFilter').addEventListener('change', render);
 $('#addBtn').addEventListener('click', () => openEdit(null));
 $('#prevMonth').addEventListener('click', () => { viewMonth = shiftMonth(viewMonth, -1); render(); });
 $('#nextMonth').addEventListener('click', () => { viewMonth = shiftMonth(viewMonth, 1); render(); });
-$('#saveGh').addEventListener('click', saveToGitHub);
+$('#saveGh').addEventListener('click', () => saveToGitHub());
 $('#settingsBtn').addEventListener('click', openSettings);
 window.addEventListener('beforeunload', (e) => {
   if (state && lsGet(LS.dirty)) { e.preventDefault(); e.returnValue = ''; }
