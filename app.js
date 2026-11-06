@@ -450,6 +450,9 @@ function render() {
           <div class="status">
             ${statusHtml(m)}
           </div>
+          <div class="nextcol">
+            ${nextHtml(m)}
+          </div>
           ${done
             ? `<button class="btn small ghost" data-act="toggle" data-uid="${m.uid}" title="Voltar para pendente">Desfazer</button>`
             : `<button class="btn small ok" data-act="toggle" data-uid="${m.uid}">✓ Marcar entregue</button>`}
@@ -515,21 +518,34 @@ async function onCopy(m, kind, btn) {
   }
 }
 
+// Coluna 1: situação + quando foi entregue
 function statusHtml(m) {
-  const left = daysLeft(m);
   const last = lastDelivery(m);
   if (isDone(m)) {
-    const cls = left <= SOON_DAYS ? 'soon' : '';
-    const falta = left === 1 ? 'vence amanhã' : `faltam ${left} dias`;
     return `
       <span class="pill done">Entregue</span>
-      <span class="next ${cls}">Próxima: <b>${fmtDay(nextDue(m))}</b> · ${falta}</span>
-      <span class="when">entregue em ${fmtDate(last)}</span>`;
+      <span class="when">${fmtDate(last)}</span>`;
   }
   return `
       <span class="pill pending">Pendente</span>
-      ${last ? `<span class="next late">Venceu em ${fmtDay(nextDue(m))}</span>
-      <span class="when">última: ${fmtDate(last)}</span>` : '<span class="when">nunca recebeu</span>'}`;
+      <span class="when">${last ? `última: ${fmtDate(last)}` : 'nunca recebeu'}</span>`;
+}
+
+// Coluna 2: próxima entrega (30 dias depois da última)
+function nextHtml(m) {
+  const left = daysLeft(m);
+  if (left === null) return '<span class="eyebrow">Próxima</span><strong class="nx-date muted">—</strong>';
+  if (left <= 0) {
+    return `
+      <span class="eyebrow">Venceu em</span>
+      <strong class="nx-date late">${fmtDay(nextDue(m))}</strong>
+      <span class="nx-left late">${left === 0 ? 'hoje' : `há ${-left} ${-left === 1 ? 'dia' : 'dias'}`}</span>`;
+  }
+  const cls = left <= SOON_DAYS ? 'soon' : '';
+  return `
+      <span class="eyebrow">Próxima</span>
+      <strong class="nx-date ${cls}">${fmtDay(nextDue(m))}</strong>
+      <span class="nx-left ${cls}">${left === 1 ? 'vence amanhã' : `faltam ${left} dias`}</span>`;
 }
 
 async function setDelivered(m, on) {
