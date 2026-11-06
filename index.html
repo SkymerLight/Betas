@@ -39,7 +39,7 @@
         </div>
         <div>
           <h1>Controle <span class="grad">VIP</span></h1>
-          <p class="sub">Entregas mensais · Betas &amp; Similar</p>
+          <p class="sub">VIP de 30 dias · Betas &amp; Similar</p>
         </div>
       </div>
       <div class="top-actions">
@@ -56,21 +56,23 @@
 
     <section class="hero">
       <div class="month">
-        <button class="btn round" id="prevMonth" title="Mês anterior">‹</button>
         <div class="month-label">
-          <span class="eyebrow">Mês de referência</span>
+          <span class="eyebrow">Hoje · ciclo de 30 dias</span>
           <strong id="monthLabel"></strong>
         </div>
-        <button class="btn round" id="nextMonth" title="Próximo mês">›</button>
       </div>
       <div class="stats">
         <div class="stat">
-          <span class="eyebrow">Entregues</span>
+          <span class="eyebrow">Em dia</span>
           <strong id="statDone" class="c-ok">0</strong>
         </div>
         <div class="stat">
           <span class="eyebrow">Pendentes</span>
           <strong id="statPending" class="c-warn">0</strong>
+        </div>
+        <div class="stat">
+          <span class="eyebrow">Vencem em 5 dias</span>
+          <strong id="statSoon" class="c-soon">0</strong>
         </div>
         <div class="stat wide">
           <div class="stat-row">
@@ -95,7 +97,8 @@
       <select id="filter">
         <option value="all">Todos</option>
         <option value="pending">Pendentes</option>
-        <option value="done">Entregues</option>
+        <option value="done">Em dia</option>
+        <option value="soon">Vencendo em 5 dias</option>
       </select>
       <select id="platFilter">
         <option value="all">Todas plataformas</option>
@@ -103,6 +106,7 @@
         <option value="tablet">Android · Tablet</option>
         <option value="ios">iOS</option>
         <option value="desktop">Desktop</option>
+        <option value="similar">Similar</option>
         <option value="none">Sem plataforma</option>
       </select>
       <button class="btn accent" id="addBtn">+ Adicionar</button>

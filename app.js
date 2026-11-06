@@ -11,7 +11,10 @@ const PLATFORMS = {
   tablet: { label: 'Android · Tablet', icon: '📱' },
   ios: { label: 'iOS', icon: '' },
   desktop: { label: 'Desktop', icon: '🖥️' },
+  similar: { label: 'Similar', icon: '✦' },
 };
+const CYCLE_DAYS = 30; // o VIP vale 30 dias a partir da entrega
+const SOON_DAYS = 5;   // "vencendo" quando faltam até 5 dias
 
 const LS = {
   local: 'vip.localBlob',   // cópia local criptografada (sempre a mais recente)
@@ -28,7 +31,6 @@ let password = null;
 let remoteBlob = null;     // blob criptografado lido do repo
 let baseUpdatedAt = null;  // updatedAt da versão do GitHub que serviu de base para as edições
 let currentCat = lsGet(LS.tab) || 'betas';
-let viewMonth = monthKey(new Date());
 let lastCopied = (() => { try { return JSON.parse(lsGet(LS.last)) || {}; } catch { return {}; } })();
 
 const $ = (s) => document.querySelector(s);
@@ -38,16 +40,6 @@ function lsGet(k) { try { return localStorage.getItem(k); } catch { return null;
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
 function lsDel(k) { try { localStorage.removeItem(k); } catch {} }
 
-function monthKey(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }
-function monthLabel(key) {
-  const [y, m] = key.split('-').map(Number);
-  const s = new Date(y, m - 1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
-  return s[0].toUpperCase() + s.slice(1);
-}
-function shiftMonth(key, delta) {
-  const [y, m] = key.split('-').map(Number);
-  return monthKey(new Date(y, m - 1 + delta, 1));
-}
 function fmtDate(iso) {
   return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
@@ -335,7 +327,10 @@ $('#lockForm').addEventListener('submit', async (e) => {
 // Plataformas do membro (aceita o formato antigo com uma só em m.platform)
 function platsOf(m) {
   const list = Array.isArray(m.platforms) ? m.platforms : (m.platform ? [m.platform] : []);
-  return list.filter((k) => PLATFORMS[k]);
+  const valid = list.filter((k) => PLATFORMS[k]);
+  // Quem é da aba Similar e não tem plataforma marcada ganha a tag Similar
+  if (!valid.length && m.cat === 'similar' && !Array.isArray(m.platforms)) return ['similar'];
+  return valid;
 }
 
 function platTag(key) {
@@ -350,7 +345,31 @@ function initials(name) {
   return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
 }
 
-function isDone(m) { return Boolean(m.delivered && m.delivered[viewMonth]); }
+// Entregas do membro em ordem (aceita o formato antigo, por mês: delivered["2026-10"])
+function deliveries(m) {
+  const list = Array.isArray(m.history) ? m.history : Object.values(m.delivered || {});
+  return [...list].sort();
+}
+function setDeliveries(m, list) {
+  m.history = [...list].sort();
+  delete m.delivered;
+}
+function lastDelivery(m) { const h = deliveries(m); return h.length ? h[h.length - 1] : null; }
+function dayStart(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
+function nextDue(m) {
+  const last = lastDelivery(m);
+  if (!last) return null;
+  const d = dayStart(last);
+  d.setDate(d.getDate() + CYCLE_DAYS);
+  return d;
+}
+function daysLeft(m) {
+  const n = nextDue(m);
+  return n ? Math.round((n - dayStart(new Date())) / 86400000) : null;
+}
+function fmtDay(d) { return new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }); }
+function isDone(m) { const d = daysLeft(m); return d !== null && d > 0; }
+function isSoon(m) { return isDone(m) && daysLeft(m) <= SOON_DAYS; }
 
 function renderSync() {
   const el = $('#syncState');
@@ -370,7 +389,8 @@ function renderSync() {
 }
 
 function render() {
-  $('#monthLabel').textContent = monthLabel(viewMonth);
+  const today = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
+  $('#monthLabel').textContent = today;
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.cat === currentCat));
 
   for (const cat of Object.keys(CATS)) {
@@ -383,6 +403,7 @@ function render() {
   const pct = inTab.length ? Math.round((doneCount / inTab.length) * 100) : 0;
   $('#statDone').textContent = doneCount;
   $('#statPending').textContent = inTab.length - doneCount;
+  $('#statSoon').textContent = inTab.filter(isSoon).length;
   $('#statPct').textContent = `${pct}%`;
   $('#statBar').style.width = `${pct}%`;
 
@@ -394,6 +415,7 @@ function render() {
     if (q && !`${m.name || ''} ${m.discord} ${m.email} ${m.note || ''}`.toLowerCase().includes(q)) return false;
     if (filter === 'pending' && isDone(m)) return false;
     if (filter === 'done' && !isDone(m)) return false;
+    if (filter === 'soon' && !isSoon(m)) return false;
     if (plat === 'none' && platsOf(m).length) return false;
     if (plat !== 'all' && plat !== 'none' && !platsOf(m).includes(plat)) return false;
     return true;
@@ -414,7 +436,7 @@ function render() {
         ${val ? `<button class="btn small copy" data-act="copy" data-kind="${kind}" data-uid="${m.uid}"${kind === 'id' ? ' title="Copia como &lt;@id&gt;"' : ''}>${copyIc}Copiar</button>` : ''}
       </div>`;
     return `
-      <li class="item p-${pkey} ${done ? 'done' : ''} ${isLast ? 'last' : ''}" data-uid="${m.uid}" style="animation-delay:${Math.min(i, 15) * 25}ms">
+      <li class="item p-${pkey} ${done ? 'done' : ''} ${isSoon(m) ? 'soon' : ''} ${isLast ? 'last' : ''}" data-uid="${m.uid}" style="animation-delay:${Math.min(i, 15) * 25}ms">
         <div class="who">
           <div class="avatar">${esc(initials(m.name))}</div>
           <div class="who-text">
@@ -426,8 +448,7 @@ function render() {
         ${field('E-mail', m.email, 'email')}
         <div class="side">
           <div class="status">
-            <span class="pill ${done ? 'done' : 'pending'}">${done ? 'Entregue' : 'Pendente'}</span>
-            ${done ? `<span class="when">${fmtDate(m.delivered[viewMonth])}</span>` : ''}
+            ${statusHtml(m)}
           </div>
           ${done
             ? `<button class="btn small ghost" data-act="toggle" data-uid="${m.uid}" title="Voltar para pendente">Desfazer</button>`
@@ -494,16 +515,34 @@ async function onCopy(m, kind, btn) {
   }
 }
 
+function statusHtml(m) {
+  const left = daysLeft(m);
+  const last = lastDelivery(m);
+  if (isDone(m)) {
+    const cls = left <= SOON_DAYS ? 'soon' : '';
+    const falta = left === 1 ? 'vence amanhã' : `faltam ${left} dias`;
+    return `
+      <span class="pill done">Entregue</span>
+      <span class="next ${cls}">Próxima: <b>${fmtDay(nextDue(m))}</b> · ${falta}</span>
+      <span class="when">entregue em ${fmtDate(last)}</span>`;
+  }
+  return `
+      <span class="pill pending">Pendente</span>
+      ${last ? `<span class="next late">Venceu em ${fmtDay(nextDue(m))}</span>
+      <span class="when">última: ${fmtDate(last)}</span>` : '<span class="when">nunca recebeu</span>'}`;
+}
+
 async function setDelivered(m, on) {
-  m.delivered = m.delivered || {};
-  if (on) m.delivered[viewMonth] = new Date().toISOString();
-  else delete m.delivered[viewMonth];
+  const h = deliveries(m);
+  if (on) h.push(new Date().toISOString());
+  else h.pop();
+  setDeliveries(m, h);
   await commit();
 }
 
 function onToggle(m) {
   if (!isDone(m)) { setDelivered(m, true); return; }
-  openModal('Desmarcar entrega?', `<p>Voltar este membro para <b>Pendente</b> em ${esc(monthLabel(viewMonth))}?</p>`, [
+  openModal('Desfazer entrega?', `<p>Apagar a entrega de <b>${esc(fmtDate(lastDelivery(m)))}</b>? O membro volta para o estado anterior.</p>`, [
     { label: 'Cancelar' },
     { label: 'Desmarcar', cls: 'danger', onClick: () => setDelivered(m, false) },
   ]);
@@ -534,7 +573,7 @@ function openEdit(m) {
       const discord = cleanDiscord($('#fDiscord').value);
       const email = $('#fEmail').value.trim();
       if (!discord && !email) { toast('Preencha o ID ou o e-mail'); return false; }
-      const target = m || { uid: uid(), delivered: {} };
+      const target = m || { uid: uid(), history: [] };
       target.cat = $('#fCat').value;
       target.name = $('#fName').value.trim();
       target.discord = discord;
@@ -542,10 +581,13 @@ function openEdit(m) {
       target.note = $('#fNote').value.trim();
       target.platforms = [...document.querySelectorAll('input[name="fPlat"]:checked')].map((x) => x.value);
       delete target.platform;
-      target.delivered = target.delivered || {};
+      // A data editada substitui a última entrega (ou cria uma, se não houver)
+      const h = deliveries(target);
+      const prev = h.pop();
       const del = $('#fDel').value;
-      if (del) target.delivered[viewMonth] = new Date(del).toISOString();
-      else delete target.delivered[viewMonth];
+      if (del) h.push(new Date(del).toISOString());
+      else if (prev && $('#fDel').dataset.cleared !== '1') h.push(prev);
+      setDeliveries(target, h);
       if (isNew) state.members.push(target);
       await commit();
       toast(isNew ? 'Membro adicionado' : 'Alterações salvas');
@@ -562,16 +604,17 @@ function openEdit(m) {
     <label>E-mail / usuário <input id="fEmail" value="${esc(m ? m.email : '')}" placeholder="email@exemplo.com"></label>
     <label>Observação (opcional) <input id="fNote" value="${esc(m ? m.note : '')}"></label>
     <div class="del-box">
-      <label>Entrega de ${esc(monthLabel(viewMonth))}
-        <input id="fDel" type="datetime-local" value="${toLocalInput(m && m.delivered && m.delivered[viewMonth])}">
+      <label>Última entrega <small>(o VIP vale ${CYCLE_DAYS} dias a partir dela)</small>
+        <input id="fDel" type="datetime-local" value="${toLocalInput(m && lastDelivery(m))}">
       </label>
+      ${m && deliveries(m).length > 1 ? `<p class="hist">Anteriores: ${deliveries(m).slice(0, -1).reverse().map(fmtDay).join(' · ')}</p>` : ''}
       <div class="del-actions">
         <button type="button" class="btn small" id="fDelNow">Agora</button>
-        <button type="button" class="btn small" id="fDelClear">Limpar (pendente)</button>
+        <button type="button" class="btn small" id="fDelClear">Apagar última entrega</button>
       </div>
     </div>`, actions);
-  $('#fDelNow').addEventListener('click', () => { $('#fDel').value = toLocalInput(new Date().toISOString()); });
-  $('#fDelClear').addEventListener('click', () => { $('#fDel').value = ''; });
+  $('#fDelNow').addEventListener('click', () => { $('#fDel').value = toLocalInput(new Date().toISOString()); $('#fDel').dataset.cleared = ''; });
+  $('#fDelClear').addEventListener('click', () => { $('#fDel').value = ''; $('#fDel').dataset.cleared = '1'; });
 }
 
 function openTokenModal(thenSave) {
@@ -724,8 +767,6 @@ $('#search').addEventListener('input', render);
 $('#filter').addEventListener('change', render);
 $('#platFilter').addEventListener('change', render);
 $('#addBtn').addEventListener('click', () => openEdit(null));
-$('#prevMonth').addEventListener('click', () => { viewMonth = shiftMonth(viewMonth, -1); render(); });
-$('#nextMonth').addEventListener('click', () => { viewMonth = shiftMonth(viewMonth, 1); render(); });
 $('#saveGh').addEventListener('click', () => saveToGitHub());
 $('#settingsBtn').addEventListener('click', openSettings);
 window.addEventListener('beforeunload', (e) => {
